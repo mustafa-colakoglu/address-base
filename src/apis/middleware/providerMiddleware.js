@@ -1,4 +1,4 @@
-const User = require("../../models/user");
+const Provider = require("../../models/provider");
 module.exports = function(){
     return async function(req, res, next){
         let token = req.headers["authorization"];
@@ -6,7 +6,7 @@ module.exports = function(){
         if(token){
             if(token.substring(0,7) == "Bearer "){
                 token = token.slice(7, token.length);
-                const decoded = await User.getDecodedToken(token);
+                const decoded = await Provider.getDecodedToken(token);
                 if(decoded){
                     req.decoded = decoded;
                     logined = true;

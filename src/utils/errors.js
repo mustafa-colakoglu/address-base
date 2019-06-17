@@ -34,5 +34,13 @@ module.exports = {
     providerNotActivated:{
         error:9,
         message:"Provider not activated"
+    },
+    emailIsNotTrue:{
+        error:10,
+        message:"Email is not true."
+    },
+    serviceCantUsableNow:{
+        error:11,
+        message:"Service cant usable now"
     }
 };

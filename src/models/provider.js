@@ -39,6 +39,7 @@ const createProvider = async function(createData = {}){
             return errors.emailOrSiteOnlyExists;
         }
         else{
+            const email = createData.email;
             const emailParse = email.split("@");
             const emailLink  = emailParse[1];
             if(emailLink == createData.link){
@@ -70,12 +71,16 @@ const createProvider = async function(createData = {}){
 };
 const loginProvider = async function(email, password){
     const findProvider = await Provider.findOne({
-        email,
-        password:md5(md5(password)),
+        email:{
+            $eq:email
+        },
+        password:{
+            $eq:md5(md5(password))
+        },
     });
     if(findProvider){
         if(findProvider.isActivated){
-            const token = jwt.sign({userId: find._id, staticCode: find.staticCode}, JWT_TOKEN, { expiresIn: 60 * 60 * 24 * 365 * 10});
+            const token = jwt.sign({providerId: findProvider._id, staticCode: findProvider.staticCode}, JWT_TOKEN, { expiresIn: 60 * 60 * 24 * 365 * 10});
             return {
                 error:0,
                 result:{
@@ -90,15 +95,29 @@ const loginProvider = async function(email, password){
     }
 };
 async function activateProvider(email, activationCode){
+    activationCode = parseInt(activationCode);
     if(validator.isEmail(email)){
-        const find = await User.findOne({email, isActivated:false});
+        const find = await Provider.findOne({
+            email:{
+                $eq:email
+            },
+            isActivated:{
+                $eq:false
+            }
+        });
         if(find){
             if(find.activationCode == activationCode){
                 const staticCode = randomCode();
                 find.staticCode = staticCode;
+                find.isActivated = true;
                 find.save();
-                const token = await loginUserStep2(email, undefined, true);
-                return token;
+                const token = jwt.sign({providerId: find._id, staticCode: find.staticCode}, JWT_TOKEN, { expiresIn: 60 * 60 * 24 * 365 * 10});
+                return {
+                    error:0,
+                    result:{
+                        token
+                    }
+                };
             }
             else{
                 return errors.activationCodeError
@@ -116,23 +135,29 @@ async function existsUser(email){
     if(validator.isEmail(email)){
         try{
             const findUserFromAxios = await axios({
-                url:IP+":"+USER_PORT+"/exists",
+                url:IP+":"+USER_PORT+"/api/user/exists",
                 method:"post",
-                headers:{
+                /*headers:{
                     "Content-Type":"Basic :"+BASIC_TOKEN
-                },
+                },*/
                 data:{
                     email
                 }
             });
             const findUser = findUserFromAxios.data;
+            console.log(findUser);
             if(findUser.result){
-                return true;
+                return {
+                    error:0,
+                    result:findUser.result,
+                    message:"Finded"
+                };
             }
-            return false;
+            return errors.userNotFound;
         }
         catch(err){
-            return false;
+            console.log(err);
+            return errors.serviceCantUsableNow;
         }
     }
     else{
@@ -140,40 +165,95 @@ async function existsUser(email){
     }
 };
 async function getAccessFromUserStep1(providerId, userEmail){
-    const findProvider = await Provider.findById(providerId);
-    if(findProvider){
-        if(findProvider.isActivated){
-            const findUserAccessFromAxios = await axios({
-                url:IP+":"+ACCESS_PORT+"/findAccess",
-                method:"post",
-                headers:{
-                    "Content-Type":"Basic :"+BASIC_TOKEN
-                },
-                data:{
-                    email:userEmail,
-                    providerId
+    const userIfExists = await existsUser(userEmail);
+    if(userIfExists.errors == 0){
+        const findProvider = await Provider.findById(providerId);
+        if(findProvider){
+            if(findProvider.isActivated){
+                try{
+                    const findUserAccessFromAxios = await axios({
+                        url:IP+":"+ACCESS_PORT+"/api/access/findAccess",
+                        method:"post",
+                        headers:{
+                            "Content-Type":"Basic :"+BASIC_TOKEN
+                        },
+                        data:{
+                            email:userEmail,
+                            providerId
+                        }
+                    });
+                    const findUserAccess = findUserAccessFromAxios.data;
+                    if(findUserAccess.result){
+                        return {
+                            error:-1,
+                            message:"You have access to user."
+                        };
+                    }
+                    else{
+                        await axios({
+                            url:IP+":"+ACCESS_PORT+"/api/access/createAccess",
+                            method:"post",
+                            headers:{
+                                "Content-Type":"Basic :"+BASIC_TOKEN
+                            },
+                            data:{
+                                email:userEmail,
+                                providerId
+                            }
+                        });
+                        return {
+                            error:-2,
+                            message:"You have not access to user. Sended email."
+                        };
+                    }
                 }
-            });
-            //TODO: User varsa izin iste, yoksa user kaydı yap ve aktivasyon yaparken izini de ver
-            const findUserAccess = findUserAccessFromAxios.data;
-            if(findUserAccess.result){
-                return {
-                    error:-1,
-                    message:"You have access to user."
-                };
+                catch(err){
+                    return {
+
+                    };
+                }
             }
-            else{
-                return {
-                    error:-2,
-                    message:"You have not access to user. Sended email."
-                };
-            }
+            return errors.providerNotActivated;
         }
-        return errors.providerNotActivated;
+        return errors.providerNotFound;
     }
-    return errors.providerNotFound; 
+    else{
+        return userIfExists;
+    }
 };
-async function getAccessFromUserStep2(providerId, userEmail, activationCode){}
+async function getAccessFromUserStep2(providerId, userEmail, accessCode){
+    const getAccessWithAccessCodeAxios = await axios({
+        url:IP+":"+ACCESS_PORT+"/api/access/getAccess",
+        method:"post",
+        headers:{
+            "Content-Type":"Basic :"+BASIC_TOKEN
+        },
+        data:{
+            email:userEmail,
+            providerId,
+            accessCode
+        }
+    });
+    const getAccessWithAccessCode = getAccessWithAccessCodeAxios.data;
+    if(getAccessWithAccessCode.error == 0){
+        return {
+            error:0,
+            message:"You have access to user"
+        };
+    }
+    else{
+        return getAccessWithAccessCode;
+    }
+};
+async function getDecodedToken(token){
+    try{
+        const decoded = await jwt.verify(token, JWT_TOKEN);
+        return decoded;
+    }
+    catch(err){
+        return false;
+    }
+};
 module.exports = Provider;
 module.exports = {
     ...module.exports,
@@ -181,5 +261,7 @@ module.exports = {
     loginProvider,
     activateProvider,
     existsUser,
-    getAccessFromUserStep1
+    getAccessFromUserStep1,
+    getAccessFromUserStep2,
+    getDecodedToken
 };
