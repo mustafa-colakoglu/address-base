@@ -164,8 +164,6 @@ module.exports = {
     ...module.exports,
     createUser,
     activateUser,
-    loginUserStep1,
-    loginUserStep2,
     getDecodedToken,
     exists
 };
